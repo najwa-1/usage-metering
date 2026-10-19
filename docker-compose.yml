@@ -1,0 +1,83 @@
+# docker compose up --build  -> db + metering service (:3000) + example client (:8080)
+# Optional: --profile test (automated tests), --profile perf (load tests)
+
+x-admin-key: &admin-key ${ADMIN_API_KEY:-change-me-admin-key}
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: metering
+      POSTGRES_PASSWORD: metering
+      POSTGRES_DB: metering
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # creates the separate metering_test database used by the test profile
+      - ./service/docker/init-test-db.sql:/docker-entrypoint-initdb.d/init-test-db.sql:ro
+    command: ["postgres", "-c", "max_connections=200"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U metering -d metering"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    ports:
+      - "5432:5432"
+
+  metering:
+    build: ./service
+    environment:
+      DATABASE_URL: postgres://metering:metering@db:5432/metering
+      ADMIN_API_KEY: *admin-key
+      PORT: "3000"
+      DB_POOL_MAX: "20"
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/health || exit 1"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+  client:
+    build: ./client
+    environment:
+      METERING_URL: http://metering:3000
+      ADMIN_API_KEY: *admin-key
+      PORT: "8080"
+    depends_on:
+      metering:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+
+  tests:
+    profiles: ["test"]
+    build:
+      context: ./service
+      target: build
+    environment:
+      TEST_DATABASE_URL: postgres://metering:metering@db:5432/metering_test
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["npx", "vitest", "run"]
+
+  perf:
+    profiles: ["perf"]
+    build: ./perf
+    environment:
+      METERING_URL: http://metering:3000
+      ADMIN_API_KEY: *admin-key
+    depends_on:
+      metering:
+        condition: service_healthy
+    volumes:
+      - ./perf/results:/perf/results
+
+volumes:
+  pgdata:
