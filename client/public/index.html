@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>DocuFlow · Metering Demo</title>
+  <style>
+    :root {
+      --bg: #f6f5f1; --panel: #ffffff; --ink: #1d1d1b; --muted: #6b6a64; --line: #e3e1d9;
+      --accent: #2f5d50; --ok: #2e7d4f; --ok-bg: #e6f2ea; --bad: #b3362b; --bad-bg: #f8e7e4; --bar: #d9d6cc;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg: #151514; --panel: #1f1f1d; --ink: #ecebe6; --muted: #9c9a92; --line: #33332f;
+              --accent: #7fb8a6; --ok: #6cc28f; --ok-bg: #1d2d23; --bad: #ef8a7e; --bad-bg: #352120; --bar: #3a3a35; }
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+    header { padding: 20px 24px 8px; max-width: 1180px; margin: 0 auto; display: flex; gap: 16px; align-items: baseline; flex-wrap: wrap; }
+    header h1 { font-size: 22px; margin: 0; letter-spacing: -0.01em; }
+    header .sub { color: var(--muted); font-size: 13px; }
+    main { max-width: 1180px; margin: 0 auto; padding: 8px 24px 40px; display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); }
+    section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; }
+    section.wide { grid-column: 1 / -1; }
+    h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 12px; font-weight: 600; }
+    .meter { margin: 8px 0 4px; height: 8px; background: var(--bar); border-radius: 4px; overflow: hidden; }
+    .meter > span { display: block; height: 100%; background: var(--accent); }
+    .big { font-size: 26px; font-weight: 650; font-variant-numeric: tabular-nums; }
+    .muted { color: var(--muted); font-size: 13px; }
+    table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+    th, td { text-align: left; padding: 7px 6px; border-bottom: 1px solid var(--line); font-size: 14px; vertical-align: middle; }
+    th { color: var(--muted); font-weight: 500; font-size: 12px; }
+    select, input, button { font: inherit; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); }
+    input[type=number] { width: 100px; }
+    button { background: var(--accent); color: #fff; border-color: var(--accent); cursor: pointer; font-weight: 550; }
+    button.ghost { background: transparent; color: var(--accent); }
+    button:disabled { opacity: .6; cursor: wait; }
+    .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
+    .decision { border-radius: 8px; padding: 12px 14px; margin-top: 8px; }
+    .decision.ok { background: var(--ok-bg); color: var(--ok); }
+    .decision.bad { background: var(--bad-bg); color: var(--bad); }
+    .decision .detail { color: var(--ink); font-size: 13px; margin-top: 6px; }
+    .pill { display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+    .pill.ok { color: var(--ok); border-color: var(--ok); }
+    .pill.bad { color: var(--bad); border-color: var(--bad); }
+    ol.steps { padding-left: 20px; margin: 0; }
+    ol.steps li { margin-bottom: 10px; }
+    code { font-family: ui-monospace, Menlo, monospace; font-size: 12.5px; }
+    .error { color: var(--bad); font-size: 13px; min-height: 18px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>DocuFlow</h1>
+    <span class="sub">Example app that asks the metering service before processing each document (1 page = 1 unit).</span>
+    <span class="sub" id="accountName"></span>
+  </header>
+
+  <main>
+    <section>
+      <h2>Shared account allowance</h2>
+      <div class="big" id="accUsed">–</div>
+      <div class="meter"><span id="accBar" style="width:0"></span></div>
+      <div class="muted" id="accPlan"></div>
+      <div class="row" style="margin-top:12px">
+        <label class="muted">Monthly <input type="number" id="planMonthly" min="0" /></label>
+        <label class="muted">Per request <input type="number" id="planMax" min="1" /></label>
+        <button class="ghost" id="savePlan">Update shared plan</button>
+      </div>
+    </section>
+
+    <section>
+      <h2>Process a document</h2>
+      <div class="row">
+        <select id="docUser"></select>
+        <input type="number" id="docPages" min="1" value="10" />
+        <span class="muted">pages</span>
+        <button id="process">Process</button>
+      </div>
+      <div id="decision"></div>
+      <div class="error" id="error"></div>
+    </section>
+
+    <section class="wide">
+      <h2>Users</h2>
+      <table>
+        <thead><tr><th>User</th><th>Plan</th><th>Per request</th><th>Used / monthly</th><th>Remaining</th><th>Switch plan</th></tr></thead>
+        <tbody id="users"></tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>Scripted demo</h2>
+      <p class="muted">Creates a fresh account and walks through: accepted action, user-limit rejection, plan switch, account-limit rejection, plan update, safe retry.</p>
+      <div class="row">
+        <button id="scenario">Run scenario</button>
+        <button class="ghost" id="reset">Reset demo account</button>
+      </div>
+      <ol class="steps" id="steps"></ol>
+    </section>
+
+    <section>
+      <h2>Recent decisions</h2>
+      <table>
+        <thead><tr><th>User</th><th>Units</th><th>Outcome</th><th>Reason</th></tr></thead>
+        <tbody id="history"></tbody>
+      </table>
+    </section>
+  </main>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const fmt = (n) => (n === null || n === undefined ? '–' : Number(n).toLocaleString('en-US'));
+    const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+
+    async function call(method, url, body) {
+      const res = await fetch(url, { method, headers: { 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || res.statusText);
+      return json;
+    }
+
+    async function refresh() {
+      const s = await call('GET', '/api/state');
+      $('accountName').textContent = s.accountName;
+      const acc = s.usage.account;
+      $('accUsed').textContent = `${fmt(acc.used)} / ${fmt(acc.currentPlan.monthlyAllowance)} units`;
+      $('accBar').style.width = `${Math.min(100, (acc.used / Math.max(1, acc.currentPlan.monthlyAllowance)) * 100)}%`;
+      $('accPlan').textContent = `Plan "${acc.currentPlan.name}" · ${fmt(acc.remaining)} remaining · max ${fmt(acc.currentPlan.maxUnitsPerRequest)} per request · ${s.usage.period} (UTC)`;
+      $('planMonthly').value = acc.currentPlan.monthlyAllowance;
+      $('planMax').value = acc.currentPlan.maxUnitsPerRequest;
+      const options = (current) => s.plans.items.map((p) => `<option value="${p.id}" ${p.id === current ? 'selected' : ''}>${esc(p.name)} (${fmt(p.monthlyAllowance)}/mo, ${fmt(p.maxUnitsPerRequest)}/req)</option>`).join('');
+      const selected = $('docUser').value;
+      $('docUser').innerHTML = s.usage.users.items.map((u) => `<option ${u.userId === selected ? 'selected' : ''}>${esc(u.userId)}</option>`).join('');
+      $('users').innerHTML = s.usage.users.items.map((u) => `
+        <tr>
+          <td><strong>${esc(u.userId)}</strong></td>
+          <td>${esc(u.currentPlan.name)} <span class="pill">${u.currentPlan.type}</span></td>
+          <td>${fmt(u.currentPlan.maxUnitsPerRequest)}</td>
+          <td>${fmt(u.used)} / ${fmt(u.currentPlan.monthlyAllowance)}</td>
+          <td>${fmt(u.remaining)}</td>
+          <td><select data-user="${esc(u.userId)}" class="switch">${options(u.currentPlan.id)}</select></td>
+        </tr>`).join('');
+      $('history').innerHTML = s.history.items.map((d) => `
+        <tr>
+          <td>${esc(d.userId)}</td>
+          <td>${fmt(d.units)}</td>
+          <td><span class="pill ${d.accepted ? 'ok' : 'bad'}">${d.accepted ? 'accepted' : 'rejected'}</span></td>
+          <td class="muted">${d.rejection ? `${d.rejection.scope} · ${d.rejection.rule}` : ''}</td>
+        </tr>`).join('');
+    }
+
+    function showDecision(d) {
+      const head = d.accepted ? `Accepted · document processed (${d.units} pages)` : `Rejected by the ${d.rejection.scope} plan · ${d.rejection.rule}`;
+      $('decision').innerHTML = `
+        <div class="decision ${d.accepted ? 'ok' : 'bad'}">
+          <strong>${esc(head)}</strong>
+          ${d.rejection ? `<div class="detail">${esc(d.rejection.message)}</div>` : ''}
+          <div class="detail">User <b>${esc(d.userId)}</b> (${esc(d.user.planName)}): ${fmt(d.user.used)} used, ${fmt(d.user.remaining)} remaining<br/>
+          Account (${esc(d.account.planName)}): ${fmt(d.account.used)} used, ${fmt(d.account.remaining)} remaining</div>
+        </div>`;
+    }
+
+    async function busy(button, fn) {
+      button.disabled = true;
+      $('error').textContent = '';
+      try { await fn(); await refresh(); }
+      catch (e) { $('error').textContent = e.message; }
+      finally { button.disabled = false; }
+    }
+
+    $('process').onclick = () => busy($('process'), async () => {
+      const r = await call('POST', '/api/documents', { userId: $('docUser').value, pages: Number($('docPages').value) });
+      showDecision(r.decision);
+    });
+    $('savePlan').onclick = () => busy($('savePlan'), () => call('PATCH', '/api/shared-plan', { monthlyAllowance: $('planMonthly').value, maxUnitsPerRequest: $('planMax').value }));
+    $('users').addEventListener('change', (e) => {
+      if (!e.target.classList.contains('switch')) return;
+      busy(e.target, () => call('PUT', `/api/users/${encodeURIComponent(e.target.dataset.user)}/plan`, { planId: e.target.value }));
+    });
+    $('reset').onclick = () => busy($('reset'), async () => { await call('POST', '/api/reset'); $('decision').innerHTML = ''; $('steps').innerHTML = ''; });
+    $('scenario').onclick = () => busy($('scenario'), async () => {
+      const { steps } = await call('POST', '/api/scenario');
+      $('steps').innerHTML = steps.map((s) => `
+        <li><span class="pill ${s.ok ? 'ok' : 'bad'}">${s.ok ? 'as expected' : 'unexpected'}</span> ${esc(s.action)}
+        <div class="muted">${esc(s.result)}</div></li>`).join('');
+    });
+    refresh().catch((e) => ($('error').textContent = e.message));
+  </script>
+</body>
+</html>
