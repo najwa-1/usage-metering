@@ -1,0 +1,15 @@
+{
+  "name": "usage-metering-perf",
+  "version": "1.0.0",
+  "description": "Load and correctness-under-load tests for the usage metering service",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "load": "tsx load-test.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.8.0"
+  }
+}
